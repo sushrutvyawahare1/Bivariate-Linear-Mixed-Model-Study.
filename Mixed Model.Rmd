@@ -1,0 +1,252 @@
+---
+title: "Bivariate Mixed Model"
+author: "Sushrut Vyawahare"
+date: "31 August 2019"
+output: html_document
+---
+
+
+#### Loading Required Libraries.
+```{r}
+library(dplyr)
+library(nlme)
+library(lattice)
+library(ggplot2)
+
+```
+
+
+#### Load Fetal Growth Data.
+```{r}
+fetal_grw <- load("C:/Users/DELL/Documents/R Script/Weight Gain/data_for_fetalGrowth.RData")
+str(fetal_grw)
+```
+
+
+```{r}
+fetal_grw <- dat_for_fg
+dim(fetal_grw)
+
+```
+
+
+
+```{r}
+fetal_grw$fw <- fetal_grw$fw/1000
+```
+
+
+
+#### Finding NA values is data.
+```{r}
+sum(is.na(fetal_grw))
+
+```
+
+
+#### Summary of fetal Growth Data.
+```{r}
+summary(fetal_grw)
+```
+
+
+#### Box Plot- Analysing outlier and droping outlier.
+```{r}
+boxplot(fetal_grw$fw)$out
+
+```
+
+
+```{r}
+boxplot(fetal_grw$fw, plot=FALSE)$out  
+outliers <- boxplot(fetal_grw$fw, plot=FALSE)$out  
+
+```
+
+
+```{r}
+fetal_grw[which(fetal_grw$fw %in% outliers),]
+fetal_grw <- fetal_grw[-which(fetal_grw$fw %in% outliers),]
+```
+
+
+#### Scatter Plot of pog Vs. fw
+```{r}
+ggplot(fetal_grw, aes(x = pog, y = fw)) + geom_point()
+```
+
+
+
+#### Creating New varible.
+```{r}
+fetal_grw$Group <- "f_gwth"
+str(fetal_grw)
+```
+
+
+```{r}
+names(fetal_grw) <- c("enrid","value_wt","pog","variable")
+```
+
+
+#### Load Weight gain data. 
+```{r}
+wt_gain <- load("C:/Users/DELL/Documents/R Script/Weight Gain/data_for_fetalGrowth_wt_gain.RData")
+str(wt_gain)
+```
+
+
+```{r}
+wt_gain <- dat_for_fg
+
+```
+
+
+```{r}
+dim(wt_gain)
+
+```
+
+
+#### Finding NA values is data.
+```{r}
+sum(is.na(wt_gain))
+
+```
+
+
+#### Summary of weight gain data.
+```{r}
+summary(wt_gain)
+
+```
+
+
+#### Box plot 
+```{r}
+boxplot(wt_gain$wt_gain)
+```
+
+
+#### Scatter plot of pog Vs. wt_gain
+```{r}
+ggplot(wt_gain, aes(x = pog, y = wt_gain)) + geom_point()
+
+```
+
+
+
+```{r}
+wt_gain$Group <- "wt_gain"
+str(wt_gain)
+```
+
+
+#### Changing the colnames names 
+```{r}
+names(wt_gain) <- c("enrid","value_wt","pog","variable")
+```
+
+
+#### Combining both data.
+```{r}
+new_data <- rbind(fetal_grw,wt_gain)
+new_data$value_wt <- log(new_data$value_wt)
+dim(new_data)
+```
+
+
+
+```{r}
+ggplot(new_data, aes(x = pog,y = value_wt,fill = variable, color = variable)) + geom_point() 
+
+```
+
+
+##### Creating dummy variables for grwth and wt_gain.Dl and De are 0/1 dummy variables coding whether the outcome is the varialbe f_gwth or wt_gain. enrid is now repeated many times and pog is repeated twice, once for each outcome variable.
+```{r}
+head(new_data)
+
+new_data$De <- ifelse(new_data$variable == 'wt_gain',1,0)
+new_data$Dl <- ifelse(new_data$variable == 'f_gwth',1,0)
+```
+
+
+```{r}
+str(new_data)
+
+new_data$variable <- as.factor(new_data$variable)
+new_data$De <- as.integer(new_data$De)
+new_data$Dl <- as.integer(new_data$Dl)
+new_data$enrid <- as.factor(new_data$enrid)
+```
+
+
+```{r}
+str(new_data)
+```
+
+
+#### Building Model using nlme package 
+##### There is a package appropriate for many types of random coefficient models, lme4 however it does not handle special residual covariance structures at the time of writing this page, so we use nlme instead. This bivariate model is special because the intercept is supressed (using the 0 notation) to allow for a separate intercept for each outcome indicate by the effect of the two dummy variables, De and Dl. Also notice that there are no "main effects" of the predictor, pog. Instead, it is interacted with the dummy variables so that its slope can be different for the two outcomes. All of the terms are made random by enrid. Finally, a homogenous residual covariance structure is specified, but it is allowed to be different between the two outcome variables.
+
+##### We specify special control arguments because the model did not converge in the default number of iterations, so they were increased.
+```{r}
+m <- lme(value_wt ~ 0 + Dl + Dl:pog + De + De:pog, data = new_data,
+         random = ~ 0 + Dl + Dl:pog + De + De:pog | enrid, 
+         weights = varIdent(form = ~1 |variable),
+         control = lmeControl(maxIter = 50, msMaxIter = 50, niterEM = 50, 
+                              opt = 'optim',
+                              optimMethod = 'SANN', msMaxEval = 200))
+```
+
+
+#### Summary of model
+```{r}
+summary(m)
+
+```
+
+
+#### Variance Covariance Matrix
+```{r}
+
+getVarCov(m)
+```
+
+
+#### Variance and Correlation 
+```{r}
+
+VarCorr(m)
+```
+
+
+```{r}
+diagnos <- data.frame(Resid = resid(m, type = "normalized"), Fitted = fitted(m),
+                      Variable = new_data$variable)
+```
+
+
+#### QQ plots of the residuals.
+```{r}
+qqmath(~Resid | Variable, data = diagnos, distribution = qnorm, 
+       prepanel = prepanel.qqmathline,
+       panel = function(x, ...) {
+         panel.qqmathline(x, ...)
+         panel.qqmath(x, ...)
+       })
+```
+
+
+#### Residual Vs. Fitted plot for both variables i.e f_gwth and wt_gain
+```{r}
+xyplot(Resid ~ Fitted, data = diagnos)
+```
+
+
+#### Residual Vs. Fitted plot seprated by variable.
+```{r}
+xyplot(Resid ~ Fitted | Variable, data = diagnos)
+```
+
